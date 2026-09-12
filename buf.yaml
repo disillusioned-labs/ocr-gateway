@@ -1,0 +1,14 @@
+version: v2
+modules:
+  - path: proto
+lint:
+  use:
+    - STANDARD
+  # Kontrak A names the service DocumentGateway (byte-stable contract,
+  # docs/reference/api-ocr-gateway.md); the Service suffix rule is waived so
+  # the wire name never drifts from the doc.
+  except:
+    - SERVICE_SUFFIX
+breaking:
+  use:
+    - FILE

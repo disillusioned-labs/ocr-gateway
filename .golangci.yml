@@ -1,0 +1,53 @@
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - copyloopvar
+    - depguard
+    - gocritic
+    - misspell
+    - nolintlint
+    - revive
+    - unconvert
+    - unparam
+    - whitespace
+  settings:
+    depguard:
+      rules:
+        # Only the composition root reads configuration; everything downstream
+        # receives the decisions already made.
+        config-is-for-composition:
+          files:
+            - "**/internal/handler/**"
+            - "**/internal/service/**"
+            - "**/internal/repository/**"
+          deny:
+            - pkg: github.com/disillusioned-labs/ocr-gateway/internal/config
+              desc: >-
+                only app/ and server/ may import config; take plain values or a
+                narrow interface instead.
+  exclusions:
+    generated: lax
+    paths:
+      - internal/repository # sqlc-generated
+    rules:
+      # Doc comments on exported symbols are not required here: nothing outside
+      # this module imports internal/, so the godoc they would produce has no
+      # audience. Comments that carry a reason are still expected -- see the
+      # convention in AGENTS.md.
+      - linters: [revive]
+        text: "^(exported|package-comments):"
+
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+  settings:
+    gofumpt:
+      module-path: github.com/disillusioned-labs/ocr-gateway
+    goimports:
+      local-prefixes:
+        - github.com/disillusioned-labs/ocr-gateway
+        - github.com/disillusioned-labs/platform

@@ -1,0 +1,96 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A new push to the same branch supersedes an in-flight run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Keep these in sync with the versions pinned in the Makefile.
+  SQLC_VERSION: "1.30.0"
+  VULN_VERSION: "v1.1.4"
+  GOLANGCI_VERSION: "v2.12.2"
+  BUF_VERSION: "v1.50.0"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          # Pinned to the version developers run locally, so CI and local
+          # results never drift. Bump both together.
+          version: ${{ env.GOLANGCI_VERSION }}
+
+  vuln:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      # Pinned, not @latest: an unpinned scanner turns an unrelated upstream
+      # release into a red build on a branch that changed nothing.
+      - run: go run golang.org/x/vuln/cmd/govulncheck@${{ env.VULN_VERSION }} ./...
+
+  # The proto contracts (Kontrak A) are byte-stable; buf lint rejects anything
+  # that would reshape them (naming, package, breaking field numbers).
+  buf-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: go run github.com/bufbuild/buf/cmd/buf@${{ env.BUF_VERSION }} lint
+
+  # sqlc diff needs the queries in db/queries; the schema comes from
+  # db/migrations. Fails when internal/repository has drifted from the SQL.
+  sqlc-diff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: go run -ldflags=-s github.com/sqlc-dev/sqlc/cmd/sqlc@${{ env.SQLC_VERSION }} diff || (echo "sqlc-generated code is stale; run 'make sqlc'" && exit 1)
+
+  # Builds the real production image so a broken Dockerfile fails here rather
+  # than at release time.
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: |
+          docker build \
+            --build-arg VERSION="${{ github.ref_name }}" \
+            --build-arg COMMIT="${{ github.sha }}" \
+            --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            -t ocr-gateway:ci .
+      # Proves the grpc entrypoint is runnable and that config validation
+      # passes on the built-in defaults - a bad COPY or a stray dependency on
+      # the build stage would otherwise only surface on first deploy.
+      - name: Smoke test the image
+        run: |
+          output=$(docker run --rm \
+            -e POSTGRES_DSN="postgres://app:app@127.0.0.1:59999/app?sslmode=disable" \
+            -e OTEL_SDK_DISABLED=true \
+            -e REDIS_MODE=required \
+            -e REDIS_ADDR=127.0.0.1:59998 \
+            ocr-gateway:ci 2>&1 || true)
+          echo "$output"
+          # Reaching the Postgres dial means config loaded and the app booted.
+          echo "$output" | grep -q "connect postgres" \
+            || (echo "::error::image did not reach the postgres connect step" && exit 1)

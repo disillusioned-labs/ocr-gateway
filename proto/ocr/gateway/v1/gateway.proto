@@ -1,0 +1,112 @@
+syntax = "proto3";
+
+package ocr.gateway.v1;
+
+option go_package = "github.com/disillusioned-labs/ocr-gateway/contract/ocr/gateway/v1;gatewaypb";
+
+// DocumentGateway is Kontrak A: the public surface business services (expense,
+// HR, ...) call to use OCR. Source of truth: docs/reference/api-ocr-gateway.md.
+//
+// The gateway is a provider-blind concierge: it authenticates the caller
+// (per-service API key), rate-limits per caller, maps doc_type -> schema_id,
+// and forwards to the ocr engine (Kontrak B) - the payload is never altered.
+// Submit is async: the caller receives document_id + QUEUED only; results
+// travel back via Kafka topics ocr.document.routed.<service>.v1.
+service DocumentGateway {
+  // Async - balik job reference, bukan hasil. Pembacaan dilakukan ocr di belakang.
+  rpc SubmitDocument(SubmitDocumentRequest) returns (SubmitDocumentResponse);
+  // Untuk polling client dan reconciliation sweep (event Kafka tidak kunjung sampai).
+  rpc GetDocument(GetDocumentRequest) returns (GetDocumentResponse);
+}
+
+message SubmitDocumentRequest {
+  string idempotency_key = 1;  // WAJIB - UUID dari pemanggil
+  string external_ref = 2;     // ID bisnis pemohon - dibalas apa adanya di semua event
+  string doc_type = 3;         // "receipt" | "invoice" | ... - NAMA BISNIS; gateway yang memetakan ke schema_id
+  FileSource source = 4;       // bentuk sama dengan Kontrak B
+}
+
+// FileSource is byte-shape-identical to Kontrak B's FileSource. Bucket + path,
+// never a presigned URL: no expiry to fail a slow worker, and the worker never
+// becomes a fetcher of arbitrary URLs (SSRF surface).
+message FileSource {
+  string bucket = 1;       // bucket object storage pemohon - wajib terdaftar di allowlist config ocr
+  string storage_path = 2; // path objek di bucket (bukan URL)
+  int64 size_bytes = 3;
+  string declared_mime = 4; // hint saja - ocr memvalidasi magic bytes sendiri
+}
+
+// SubmitDocumentResponse is byte-shape-identical to Kontrak B's.
+message SubmitDocumentResponse {
+  string document_id = 1;
+  DocumentStatus status = 2; // selalu QUEUED
+}
+
+// GetDocumentRequest is byte-shape-identical to Kontrak B's.
+message GetDocumentRequest {
+  string document_id = 1;
+}
+
+// GetDocumentResponse is byte-shape-identical to Kontrak B's; the gateway
+// forwards ocr's answer untouched.
+message GetDocumentResponse {
+  string document_id = 1;
+  DocumentStatus status = 2;
+  DocumentResult result = 3; // null sampai COMPLETED / NEEDS_REVIEW
+  Error error = 4;           // terisi saat FAILED
+}
+
+enum DocumentStatus {
+  DOCUMENT_STATUS_UNSPECIFIED = 0;
+  DOCUMENT_STATUS_QUEUED = 1;
+  DOCUMENT_STATUS_PROCESSING = 2;
+  DOCUMENT_STATUS_COMPLETED = 3;
+  DOCUMENT_STATUS_NEEDS_REVIEW = 4;
+  DOCUMENT_STATUS_FAILED = 5;
+}
+
+// DocumentResult is byte-shape-identical to Kontrak B's - the same shape that
+// flows inside document.processed / document.routed event payloads.
+message DocumentResult {
+  string schema_version = 1;
+  double avg_confidence = 2;
+  repeated ExtractedField fields = 3;
+  repeated Issue issues = 4;
+}
+
+message ExtractedField {
+  string name = 1;     // "merchant", "date", "total", ...
+  string value = 2;    // teks; untuk uang pakai amount + currency (di bawah)
+  int64 amount = 3;    // uang: BIGINT satuan terkecil (IDR = rupiah utuh) - konvensi uang platform
+  string currency = 4; // ISO 4217, hanya field uang
+  double confidence = 5;
+  FieldStatus status = 6;
+  BoundingBox bbox = 7; // lokasi baris sumber di gambar - untuk UI review
+  int32 page = 8;
+}
+
+message BoundingBox {
+  int32 x1 = 1;
+  int32 y1 = 2;
+  int32 x2 = 3;
+  int32 y2 = 4;
+}
+
+enum FieldStatus {
+  FIELD_STATUS_UNSPECIFIED = 0;
+  FIELD_STATUS_EXTRACTED = 1;
+  FIELD_STATUS_LOW_CONFIDENCE = 2;
+  FIELD_STATUS_MISSING = 3;
+  FIELD_STATUS_INVALID = 4; // format rusak (tanggal gagal parse, dsb.)
+}
+
+message Issue {
+  string code = 1;  // LOW_CONFIDENCE | VALIDATION_FAILED | PAGE_UNREADABLE | UNSUPPORTED_FILE_TYPE
+  string field = 2;
+  string detail = 3; // untuk manusia - consumer DILARANG mem-parse isi detail
+}
+
+message Error {
+  string code = 1;    // UNSUPPORTED_FILE_TYPE | FILE_CORRUPT | STORAGE_OBJECT_MISSING | RESOURCE_LIMIT | INTERNAL
+  string message = 2; // untuk logging - bukan untuk di-parse consumer
+}

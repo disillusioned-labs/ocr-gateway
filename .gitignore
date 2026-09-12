@@ -1,0 +1,18 @@
+# Binaries
+/bin/
+*.exe
+
+# Environment (real secrets); .env.example is committed
+.env
+.env.compose
+.env.*.local
+
+# Go
+*.test
+*.out
+/vendor/
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store

@@ -1,0 +1,11 @@
+# Generated code lands in contract/ocr/gateway/v1 (NOT internal/): expense
+# imports the gatewaypb client from its own module, and cross-module imports
+# of an internal/ tree are refused by the Go toolchain.
+version: v2
+plugins:
+  - local: protoc-gen-go
+    out: contract
+    opt: paths=source_relative
+  - local: protoc-gen-go-grpc
+    out: contract
+    opt: paths=source_relative

@@ -1,0 +1,25 @@
+# Keep the build context to what the image actually needs. Without this,
+# COPY . . ships .git and IDE state into the builder and every branch switch
+# invalidates the layer cache.
+.git
+.gitignore
+.gitattributes
+.github
+.idea
+.vscode
+
+bin/
+*.exe
+*.test
+*.out
+coverage.*
+.env
+
+# Compose and deploy manifests describe the local stack, not the image.
+docker-compose.yml
+Dockerfile
+.dockerignore
+deploy/
+
+# Docs
+*.md

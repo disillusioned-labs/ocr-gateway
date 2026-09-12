@@ -1,0 +1,5 @@
+# Force LF everywhere so gofumpt/CI results match across OSes; Windows
+# checkouts with core.autocrlf would otherwise reintroduce CRLF.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
