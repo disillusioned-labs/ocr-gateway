@@ -3,7 +3,7 @@ module github.com/disillusioned-labs/ocr-gateway
 go 1.25.12
 
 require (
-	github.com/disillusioned-labs/platform v0.6.0
+	github.com/disillusioned-labs/platform v0.7.0
 	github.com/go-chi/chi/v5 v5.3.1
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.10.0

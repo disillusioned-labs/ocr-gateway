@@ -7,8 +7,8 @@ github.com/cenkalti/backoff/v5 v5.0.3/go.mod h1:rkhZdG3JZukswDf7f0cwqPNk4K0sa+F9
 github.com/cespare/xxhash/v2 v2.3.0 h1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=
 github.com/cespare/xxhash/v2 v2.3.0/go.mod h1:VGX0DQ3Q6kWi7AoAeZDth3/j3BFtOZR5XLFGgcrjCOs=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
-github.com/disillusioned-labs/platform v0.6.0 h1:3xeelzKLifwvFtIdqQCkxAFODGx6IsCF2wVkIO7r260=
-github.com/disillusioned-labs/platform v0.6.0/go.mod h1:xDjkuJP9NYfQBE2FNxU5gY7YfCRVsIp9It0G4fihxzc=
+github.com/disillusioned-labs/platform v0.7.0 h1:d8vbCbxVY5y3WJ4SmSluvu6cl6bNN5sgJiPxVatOwNU=
+github.com/disillusioned-labs/platform v0.7.0/go.mod h1:xDjkuJP9NYfQBE2FNxU5gY7YfCRVsIp9It0G4fihxzc=
 github.com/dustin/go-humanize v1.0.1 h1:GzkhY7T5VNhEkwH0PVJgjz+fX1rhBrR7pRT3mDkpeCY=
 github.com/dustin/go-humanize v1.0.1/go.mod h1:Mu1zIs6XwVuF/gI1OepvI0qD18qycQx+mFykh5fBlto=
 github.com/exaring/otelpgx v0.11.1 h1:pE79fIg/qh/Lpu00kvswFC5dKfqyJJhMJ4Y4N3w5Lj4=
