@@ -65,7 +65,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-      - run: go run -ldflags=-s github.com/sqlc-dev/sqlc/cmd/sqlc@${{ env.SQLC_VERSION }} diff || (echo "sqlc-generated code is stale; run 'make sqlc'" && exit 1)
+      - run: make sqlc-diff || (echo "sqlc-generated code is stale; run 'make sqlc'" && exit 1)
 
   # Builds the real production image so a broken Dockerfile fails here rather
   # than at release time.
