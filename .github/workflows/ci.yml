@@ -65,7 +65,19 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-      - run: make sqlc-diff || (echo "sqlc-generated code is stale; run 'make sqlc'" && exit 1)
+      - name: Check generated SQL code
+        run: |
+          if make sqlc-diff > sqlc-diff.log 2>&1; then
+            cat sqlc-diff.log
+          else
+            cat sqlc-diff.log
+            detail=$(tail -c 6000 sqlc-diff.log)
+            detail=${detail//'%'/'%25'}
+            detail=${detail//$'\r'/'%0D'}
+            detail=${detail//$'\n'/'%0A'}
+            printf '::error title=sqlc-diff failed::%s\n' "$detail"
+            exit 1
+          fi
 
   # Builds the real production image so a broken Dockerfile fails here rather
   # than at release time.
