@@ -9,8 +9,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/disillusioned-labs/ocr-gateway/internal/handler"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/disillusioned-labs/ocr-gateway/internal/handler"
 )
 
 // Pinger is satisfied by *pgxpool.Pool; other dependencies adapt to it in

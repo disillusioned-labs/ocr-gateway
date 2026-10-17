@@ -1,10 +1,10 @@
--- The outbox queries are the standard cross-service set (same shape as
--- expense's): the router inserts inside its single transaction, the worker
--- claims with SKIP LOCKED and marks published or failed.
+-- The routed outbox row uses a deterministic ID derived from the source
+-- event_id. Its primary key is the durable dedupe guard on redelivery.
 
--- name: CreateOutboxEvent :one
+-- name: CreateOutboxEvent :execrows
 INSERT INTO outbox_events (aggregate_type,
                            aggregate_id,
+                           id,
                            event_type,
                            event_version,
                            topic,
@@ -16,22 +16,9 @@ VALUES ($1,
         $4,
         $5,
         $6,
-        $7) RETURNING
-    id,
-    aggregate_type,
-    aggregate_id,
-    event_type,
-    event_version,
-    topic,
-    payload,
-    created_at,
-    published_at,
-    trace_id,
-    attempt_count,
-    next_attempt_at,
-    locked_at,
-    locked_by,
-    last_error;
+        $7,
+        $8)
+ON CONFLICT (id) DO NOTHING;
 
 -- name: ClaimPendingOutboxEvents :many
 WITH pending_events AS (SELECT id

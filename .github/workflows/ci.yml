@@ -79,13 +79,14 @@ jobs:
             --build-arg COMMIT="${{ github.sha }}" \
             --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             -t ocr-gateway:ci .
-      # Proves the grpc entrypoint is runnable and that config validation
-      # passes on the built-in defaults - a bad COPY or a stray dependency on
-      # the build stage would otherwise only surface on first deploy.
+      # Proves the grpc entrypoint is runnable and reaches the database dial
+      # with required caller config - a bad COPY or build-stage dependency
+      # would otherwise surface only on first deploy.
       - name: Smoke test the image
         run: |
           output=$(docker run --rm \
             -e POSTGRES_DSN="postgres://app:app@127.0.0.1:59999/app?sslmode=disable" \
+            -e 'GATEWAY_CALLERS=[{"name":"expense","api_key_hash":"0000000000000000000000000000000000000000000000000000000000000000","rate_limit":{"requests":1,"window":"1s"},"doc_types":{"receipt":"receipt@1"}}]' \
             -e OTEL_SDK_DISABLED=true \
             -e REDIS_MODE=required \
             -e REDIS_ADDR=127.0.0.1:59998 \

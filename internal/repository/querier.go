@@ -12,10 +12,9 @@ import (
 
 type Querier interface {
 	ClaimPendingOutboxEvents(ctx context.Context, arg ClaimPendingOutboxEventsParams) ([]OutboxEvent, error)
-	// The outbox queries are the standard cross-service set (same shape as
-	// expense's): the router inserts inside its single transaction, the worker
-	// claims with SKIP LOCKED and marks published or failed.
-	CreateOutboxEvent(ctx context.Context, arg CreateOutboxEventParams) (OutboxEvent, error)
+	// The routed outbox row uses a deterministic ID derived from the source
+	// event_id. Its primary key is the durable dedupe guard on redelivery.
+	CreateOutboxEvent(ctx context.Context, arg CreateOutboxEventParams) (int64, error)
 	DeletePublishedOutboxEvents(ctx context.Context) (int64, error)
 	MarkOutboxEventFailed(ctx context.Context, arg MarkOutboxEventFailedParams) error
 	MarkOutboxEventPublished(ctx context.Context, id uuid.UUID) error

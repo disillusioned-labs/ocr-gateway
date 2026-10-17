@@ -92,10 +92,11 @@ func (q *Queries) ClaimPendingOutboxEvents(ctx context.Context, arg ClaimPending
 	return items, nil
 }
 
-const createOutboxEvent = `-- name: CreateOutboxEvent :one
+const createOutboxEvent = `-- name: CreateOutboxEvent :execrows
 
 INSERT INTO outbox_events (aggregate_type,
                            aggregate_id,
+                           id,
                            event_type,
                            event_version,
                            topic,
@@ -107,27 +108,15 @@ VALUES ($1,
         $4,
         $5,
         $6,
-        $7) RETURNING
-    id,
-    aggregate_type,
-    aggregate_id,
-    event_type,
-    event_version,
-    topic,
-    payload,
-    created_at,
-    published_at,
-    trace_id,
-    attempt_count,
-    next_attempt_at,
-    locked_at,
-    locked_by,
-    last_error
+        $7,
+        $8)
+ON CONFLICT (id) DO NOTHING
 `
 
 type CreateOutboxEventParams struct {
 	AggregateType string      `json:"aggregate_type"`
 	AggregateID   uuid.UUID   `json:"aggregate_id"`
+	ID            uuid.UUID   `json:"id"`
 	EventType     string      `json:"event_type"`
 	EventVersion  int32       `json:"event_version"`
 	Topic         string      `json:"topic"`
@@ -135,38 +124,23 @@ type CreateOutboxEventParams struct {
 	TraceID       pgtype.Text `json:"trace_id"`
 }
 
-// The outbox queries are the standard cross-service set (same shape as
-// expense's): the router inserts inside its single transaction, the worker
-// claims with SKIP LOCKED and marks published or failed.
-func (q *Queries) CreateOutboxEvent(ctx context.Context, arg CreateOutboxEventParams) (OutboxEvent, error) {
-	row := q.db.QueryRow(ctx, createOutboxEvent,
+// The routed outbox row uses a deterministic ID derived from the source
+// event_id. Its primary key is the durable dedupe guard on redelivery.
+func (q *Queries) CreateOutboxEvent(ctx context.Context, arg CreateOutboxEventParams) (int64, error) {
+	result, err := q.db.Exec(ctx, createOutboxEvent,
 		arg.AggregateType,
 		arg.AggregateID,
+		arg.ID,
 		arg.EventType,
 		arg.EventVersion,
 		arg.Topic,
 		arg.Payload,
 		arg.TraceID,
 	)
-	var i OutboxEvent
-	err := row.Scan(
-		&i.ID,
-		&i.AggregateType,
-		&i.AggregateID,
-		&i.EventType,
-		&i.EventVersion,
-		&i.Topic,
-		&i.Payload,
-		&i.CreatedAt,
-		&i.PublishedAt,
-		&i.TraceID,
-		&i.AttemptCount,
-		&i.NextAttemptAt,
-		&i.LockedAt,
-		&i.LockedBy,
-		&i.LastError,
-	)
-	return i, err
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const deletePublishedOutboxEvents = `-- name: DeletePublishedOutboxEvents :execrows

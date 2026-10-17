@@ -1,7 +1,6 @@
 package app
 
 import (
-	"context"
 	"log/slog"
 
 	"github.com/disillusioned-labs/ocr-gateway/internal/config"
@@ -12,7 +11,7 @@ import (
 
 // newOcrClient creates the gRPC client to the ocr engine (Kontrak B).
 // Returns (client, cleanup, error). Caller must defer cleanup.
-func newOcrClient(ctx context.Context, cfg *config.Config, log *slog.Logger) (contract.Client, func(), error) {
+func newOcrClient(cfg *config.Config, log *slog.Logger) (contract.Client, func(), error) {
 	opts := []platformgrpc.Option{
 		platformgrpc.WithUnaryTimeout(cfg.GRPCClient.Timeout),
 		platformgrpc.WithMaxRecvMsgSize(cfg.GRPCClient.MaxRecvMsgSize),
@@ -33,6 +32,6 @@ func newOcrClient(ctx context.Context, cfg *config.Config, log *slog.Logger) (co
 
 // buildDeps assembles the grpc binary's dependencies. It is the only place
 // that knows concrete constructors; everything downstream takes interfaces.
-func buildDeps(cfg *config.Config, ocrClient contract.Client, log *slog.Logger) (gateway.Service, error) {
-	return gateway.NewService(ocrClient, log), nil
+func buildDeps(ocrClient contract.Client, log *slog.Logger) gateway.Service {
+	return gateway.NewService(ocrClient, log)
 }

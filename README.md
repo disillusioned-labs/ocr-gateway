@@ -15,8 +15,8 @@ Gateway adalah **kurir yang berdisiplin, bukan penyunting**:
 1. **Auth per-service** — API key per caller (hash SHA-256 di `GATEWAY_CALLERS`), bukan JWT user.
 2. **Rate limit per caller** — Redis fixed window; over → `RESOURCE_EXHAUSTED` + `retry-after`.
 3. **Mapping `doc_type → schema_id`** — satu-satunya transformasi kontrak, ditambah `caller_id`.
-4. **Dedupe event** — Redis `SET NX EX` per `event_id` (TTL ≥ 24 jam, prefix `ocr:dedupe:event:`), di `cmd/consumer`.
-5. **Routing balik** — baca `caller_id` dari event `document.processed`, tulis event `document.routed` ke **outbox sendiri** (satu transaksi), worker mem-publish ke `ocr.document.routed.<service>.v1` dengan **event_id baru** dan message key `external_ref`.
+4. **Dedupe event** — Redis fast-path per `event_id` (TTL ≥ 24 jam); mark ditulis setelah commit. Primary key outbox memakai ID routed deterministik dari source event agar redelivery aman saat Redis mark gagal.
+5. **Routing balik** — baca `caller_id` dari event `document.processed`, tulis event `document.routed` ke **outbox sendiri** (satu transaksi), worker mem-publish ke `ocr.document.routed.<service>.v1` dengan **event_id baru yang stabil untuk redelivery** dan message key `external_ref`.
 
 Gateway tidak menyimpan status dokumen, tidak tahu bisnis (total, pajak, approval), dan tidak mengubah payload — tabel satu-satunya di database `ocr_gateway` adalah `outbox_events`. Hasil OCR sampai ke pemohon lewat event Kafka, bukan respons sinkron; `GetDocument` adalah passthrough untuk polling client dan reconciliation sweep.
 

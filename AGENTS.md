@@ -46,10 +46,12 @@ lands.
   after the routed event is durable in the gateway's own outbox (one
   `ExecTx`). Publishing routed events happens exclusively through the outbox
   worker - never a direct produce from the consumer path.
-- **Dedupe layers.** Redis `SET NX EX` per `event_id` is the efficiency
-  layer; the requester's DB unique constraint is the truth layer. Redis
-  failure in the consumer fails closed (no commit, redelivery) - a missing
-  mark must not become a second routed event.
+- **Dedupe layers.** The gateway's outbox primary key is the durable truth:
+  derive a stable routed event UUID from the source `event_id` and insert with
+  `ON CONFLICT DO NOTHING`. Redis is only a fast-path mark and is written
+  after the outbox commit; checking Redis before the insert must never create
+  a marker that can hide a failed DB write. Redis lookup failure in the
+  consumer fails closed (no commit, redelivery).
 - **Errors pass through.** ocr's gRPC statuses reach Kontrak A callers
   unchanged (`contract.NewGRPCOcrClient` deliberately has no fallback). The
   gateway-originated errors are only mapping errors (`service/gateway`) and

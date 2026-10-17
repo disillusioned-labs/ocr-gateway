@@ -106,16 +106,13 @@ func RunGRPC(cfg *config.Config) error {
 	// -------------------------------------------------------------------------
 	// Dependencies
 	// -------------------------------------------------------------------------
-	ocrClient, closeOcr, err := newOcrClient(ctx, cfg, log)
+	ocrClient, closeOcr, err := newOcrClient(cfg, log)
 	if err != nil {
 		return fmt.Errorf("connect ocr gRPC: %w", err)
 	}
 	defer closeOcr()
 
-	svc, err := buildDeps(cfg, ocrClient, log)
-	if err != nil {
-		return fmt.Errorf("build dependencies: %w", err)
-	}
+	svc := buildDeps(ocrClient, log)
 
 	// -------------------------------------------------------------------------
 	// Servers
@@ -224,7 +221,7 @@ func setupRedis(ctx context.Context, cfg *config.Config, log *slog.Logger) (*gor
 // may be nil, and then the probe reports the degradation instead of panicking.
 func redisPinger(rdb *goredis.Client) health.Pinger {
 	if rdb == nil {
-		return server.PingFunc(func(ctx context.Context) error {
+		return server.PingFunc(func(context.Context) error {
 			return errors.New("redis unavailable (optional mode)")
 		})
 	}

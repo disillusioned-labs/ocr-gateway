@@ -8,12 +8,13 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/disillusioned-labs/ocr-gateway/internal/service/gateway"
-	gatewaypb "github.com/disillusioned-labs/ocr-gateway/contract/ocr/gateway/v1"
-	ocrpb "github.com/disillusioned-labs/platform/contract/ocr"
-	platformerrors "github.com/disillusioned-labs/platform/errors"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	gatewaypb "github.com/disillusioned-labs/ocr-gateway/contract/ocr/gateway/v1"
+	"github.com/disillusioned-labs/ocr-gateway/internal/service/gateway"
+	ocrpb "github.com/disillusioned-labs/platform/contract/ocr"
+	platformerrors "github.com/disillusioned-labs/platform/errors"
 )
 
 // GatewayServer implements Kontrak A (ocr.gateway.v1.DocumentGateway).

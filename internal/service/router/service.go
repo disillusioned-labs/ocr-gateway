@@ -20,10 +20,11 @@ import (
 
 var tracer = otel.Tracer("service/router")
 
-// dedupeKeyPrefix namespaces the gateway's dedupe keys. The event_id space is
-// shared with every other consumer on the bus; the prefix is what keeps this
-// service's marks out of theirs.
-const dedupeKeyPrefix = "ocr:dedupe:event:"
+// dedupeKeyPrefix versions marks written only after the routed outbox row is
+// durable; the old prefix could contain marks written before a failed insert.
+const dedupeKeyPrefix = "ocr:dedupe:routed:v2:event:"
+
+const routedEventIDNamespace = "disillusioned-labs/ocr-gateway/document.routed/v1/"
 
 // Service routes one document.processed event to its caller's topic. It owns
 // the transaction that makes "routed" durable, so it is the one service here
@@ -68,22 +69,8 @@ func (s *routerService) Handle(ctx context.Context, env envelope.Envelope, trace
 		attribute.String("router.caller_id", env.CallerID),
 	)
 
-	// Step 2: dedupe. SET NX is the mark; losing the race means a duplicate
-	// delivery - a no-op plus commit, never a second routed event.
-	set, err := s.rdb.SetNX(ctx, dedupeKeyPrefix+env.EventID, "1", s.opts.DedupeTTL).Result()
-	if err != nil {
-		// Fail closed: without the mark we cannot tell fresh from duplicate.
-		// The record stays uncommitted and Kafka redelivers.
-		span.RecordError(err)
-		span.SetStatus(codes.Error, "dedupe check failed")
-		return fmt.Errorf("dedupe %s: %w", env.EventID, err)
-	}
-	if !set {
-		s.log.InfoContext(ctx, "duplicate event delivery; skipping", "event_id", env.EventID)
-		return nil
-	}
-
-	// Step 3: route by caller_id - stateless, no mapping table.
+	// Validate before touching Redis so permanent contract errors can reach DLQ
+	// even when Redis is unavailable.
 	if !s.opts.KnownCaller(env.CallerID) {
 		span.SetStatus(codes.Error, "unknown caller")
 		return &PermanentError{Reason: fmt.Sprintf("caller_id %q is not registered", env.CallerID)}
@@ -94,6 +81,30 @@ func (s *routerService) Handle(ctx context.Context, env envelope.Envelope, trace
 		span.SetStatus(codes.Error, "document_id not a uuid")
 		return &PermanentError{Reason: fmt.Sprintf("document_id %q is not a uuid", env.DocumentID)}
 	}
+	sourceEventID, err := uuid.Parse(env.EventID)
+	if err != nil {
+		span.SetStatus(codes.Error, "event_id not a uuid")
+		return &PermanentError{Reason: fmt.Sprintf("event_id %q is not a uuid", env.EventID)}
+	}
+
+	routedID := uuid.NewSHA1(uuid.NameSpaceURL, append([]byte(routedEventIDNamespace), sourceEventID[:]...))
+	if s.rdb == nil {
+		return fmt.Errorf("dedupe redis unavailable")
+	}
+
+	// Redis is only a fast path. Its marker is written after the outbox commit;
+	// the deterministic outbox ID remains the durable dedupe key if Redis fails.
+	key := dedupeKeyPrefix + env.EventID
+	exists, err := s.rdb.Exists(ctx, key).Result()
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "dedupe check failed")
+		return fmt.Errorf("dedupe %s: %w", env.EventID, err)
+	}
+	if exists > 0 {
+		s.log.InfoContext(ctx, "duplicate event delivery; skipping", "event_id", env.EventID)
+		return nil
+	}
 
 	// The four deltas (and only those): new event_id, document.routed,
 	// ocr-gateway. Value fields - external_ref, caller_id, idempotency_key,
@@ -101,7 +112,7 @@ func (s *routerService) Handle(ctx context.Context, env envelope.Envelope, trace
 	routed := env
 	routed.EventType = constant.EventTypeDocumentRouted
 	routed.Producer = constant.ProducerName
-	routed.EventID = uuid.NewString()
+	routed.EventID = routedID.String()
 	payload, err := routed.Marshal()
 	if err != nil {
 		span.RecordError(err)
@@ -109,16 +120,13 @@ func (s *routerService) Handle(ctx context.Context, env envelope.Envelope, trace
 		return fmt.Errorf("marshal routed payload: %w", err)
 	}
 
-	// Step 4: one transaction. The routed event is durable before the
-	// consumer commits the Kafka offset, so there is no window where the
-	// event is lost - only windows where it redelivers and dedupes. The docs'
-	// "marker processed" is this row itself: with exactly one table in the
-	// gateway's database, published_at on the outbox row IS the processed
-	// flag - there is no second table to mark.
+	// Step 4: the source event deterministically names its outbox row. The
+	// primary key makes retries idempotent even if Redis is lost or unavailable.
 	err = s.repo.ExecTx(ctx, func(q repository.Querier) error {
 		_, err := q.CreateOutboxEvent(ctx, repository.CreateOutboxEventParams{
 			AggregateType: constant.AggregateType,
 			AggregateID:   documentID,
+			ID:            routedID,
 			EventType:     constant.EventTypeDocumentRouted,
 			EventVersion:  constant.EventVersion,
 			Topic:         constant.RoutedTopic(s.opts.RoutedTopicTemplate, env.CallerID),
@@ -131,6 +139,12 @@ func (s *routerService) Handle(ctx context.Context, env envelope.Envelope, trace
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "outbox insert failed")
 		return fmt.Errorf("insert routed outbox event: %w", err)
+	}
+
+	if _, err := s.rdb.SetNX(ctx, key, "1", s.opts.DedupeTTL).Result(); err != nil {
+		// The primary-key conflict above makes a later redelivery safe; Redis
+		// failure here must not keep an already durable event uncommitted.
+		s.log.WarnContext(ctx, "dedupe mark failed after durable outbox insert", "error", err, "event_id", env.EventID)
 	}
 
 	s.log.InfoContext(ctx, "event routed",

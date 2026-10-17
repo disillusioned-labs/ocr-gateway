@@ -6,16 +6,19 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"math"
 	"strconv"
 	"time"
 
-	"github.com/disillusioned-labs/ocr-gateway/internal/config"
-	"github.com/disillusioned-labs/ocr-gateway/internal/service/gateway"
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+
+	gatewaypb "github.com/disillusioned-labs/ocr-gateway/contract/ocr/gateway/v1"
+	"github.com/disillusioned-labs/ocr-gateway/internal/config"
+	"github.com/disillusioned-labs/ocr-gateway/internal/service/gateway"
 )
 
 // apiKeyHeader carries the caller's API key on every Kontrak A RPC.
@@ -90,6 +93,11 @@ func NewRateLimiter(rdb *redis.Client, log *slog.Logger) *RateLimiter {
 // of submit for every caller at once, and the engine's own queue bound stays
 // in place regardless.
 func (l *RateLimiter) Allow(ctx context.Context, caller gateway.Caller, limit config.CallerConfig) (time.Duration, bool) {
+	if l.rdb == nil {
+		l.log.WarnContext(ctx, "rate limit check failed; allowing request", "error", "redis unavailable", "caller", caller.Name)
+		return 0, true
+	}
+
 	window := limit.RateLimit.Window
 	windowStart := time.Now().UnixNano() / int64(window)
 	key := fmt.Sprintf("ocr:ratelimit:%s:%d", caller.Name, windowStart)
@@ -102,7 +110,9 @@ func (l *RateLimiter) Allow(ctx context.Context, caller gateway.Caller, limit co
 	if n == 1 {
 		// First hit in this window: set the TTL so dead callers' counters
 		// do not accumulate. Window*2 comfortably covers clock skew.
-		l.rdb.Expire(ctx, key, 2*window)
+		if err := l.rdb.Expire(ctx, key, 2*window).Err(); err != nil {
+			l.log.WarnContext(ctx, "rate limit expiry failed", "error", err, "caller", caller.Name)
+		}
 	}
 	if n > int64(limit.RateLimit.Requests) {
 		elapsed := time.Duration(time.Now().UnixNano() - windowStart*int64(window))
@@ -113,9 +123,9 @@ func (l *RateLimiter) Allow(ctx context.Context, caller gateway.Caller, limit co
 
 // UnaryAuth returns the Kontrak A interceptor: authenticate by API key, rate
 // limit per caller, stamp the caller into the context, and count the outcome.
-func UnaryAuth(reg *CallerRegistry, limits map[string]config.CallerConfig, limiter *RateLimiter, metrics *Metrics, log *slog.Logger) grpc.UnaryServerInterceptor {
+func UnaryAuth(reg *CallerRegistry, limits map[string]config.CallerConfig, limiter *RateLimiter, metrics *Metrics) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
-		caller, rejected, err := authenticate(ctx, reg, limits, limiter)
+		caller, rejected, err := authenticate(ctx, info.FullMethod, reg, limits, limiter)
 		if rejected {
 			metrics.Requests(ctx, "", err)
 			return nil, err
@@ -130,7 +140,7 @@ func UnaryAuth(reg *CallerRegistry, limits map[string]config.CallerConfig, limit
 
 // authenticate performs the two gate checks; rejected=true means the request
 // dies here and err is the terminal status.
-func authenticate(ctx context.Context, reg *CallerRegistry, limits map[string]config.CallerConfig, limiter *RateLimiter) (gateway.Caller, bool, error) {
+func authenticate(ctx context.Context, method string, reg *CallerRegistry, limits map[string]config.CallerConfig, limiter *RateLimiter) (gateway.Caller, bool, error) {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
 		return gateway.Caller{}, true, status.Error(codes.Unauthenticated, "missing metadata")
@@ -150,13 +160,19 @@ func authenticate(ctx context.Context, reg *CallerRegistry, limits map[string]co
 		return gateway.Caller{}, true, status.Error(codes.Internal, "caller rate limit not configured")
 	}
 
-	retryAfter, allowed := limiter.Allow(ctx, caller, limit)
-	if !allowed {
-		// Response metadata, not the message: consumers branch on the status
-		// code and read retry-after, never the human text.
-		_ = grpc.SetHeader(ctx, metadata.Pairs(retryAfterHeader, strconv.Itoa(int(retryAfter.Seconds()))))
-		return gateway.Caller{}, true, status.Errorf(codes.ResourceExhausted,
-			"rate limit exceeded for caller %q", caller.Name)
+	if method == gatewaypb.DocumentGateway_SubmitDocument_FullMethodName {
+		retryAfter, allowed := limiter.Allow(ctx, caller, limit)
+		if !allowed {
+			// Response metadata, not the message: consumers branch on the status
+			// code and read retry-after, never the human text.
+			seconds := int(math.Ceil(retryAfter.Seconds()))
+			if seconds < 1 {
+				seconds = 1
+			}
+			_ = grpc.SetHeader(ctx, metadata.Pairs(retryAfterHeader, strconv.Itoa(seconds)))
+			return gateway.Caller{}, true, status.Errorf(codes.ResourceExhausted,
+				"rate limit exceeded for caller %q", caller.Name)
+		}
 	}
 	return caller, false, nil
 }

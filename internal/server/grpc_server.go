@@ -6,12 +6,13 @@ import (
 	"log/slog"
 	"net"
 
+	"github.com/redis/go-redis/v9"
+
+	gatewaypb "github.com/disillusioned-labs/ocr-gateway/contract/ocr/gateway/v1"
 	"github.com/disillusioned-labs/ocr-gateway/internal/config"
 	grpchandler "github.com/disillusioned-labs/ocr-gateway/internal/handler/grpc"
 	"github.com/disillusioned-labs/ocr-gateway/internal/service/gateway"
-	gatewaypb "github.com/disillusioned-labs/ocr-gateway/contract/ocr/gateway/v1"
 	platformgrpc "github.com/disillusioned-labs/platform/grpc"
-	"github.com/redis/go-redis/v9"
 )
 
 // GRPCServer assembles the Kontrak A listener. It serves only
@@ -37,7 +38,7 @@ func NewGRPC(cfg *config.Config, log *slog.Logger, rdb *redis.Client, svc gatewa
 		platformgrpc.WithMaxSendMsgSize(cfg.GRPC.MaxSendMsgSize),
 		platformgrpc.WithMaxHeaderSize(cfg.GRPC.MaxHeaderSize),
 		platformgrpc.WithLogger(log),
-		platformgrpc.WithUnaryServerInterceptor(UnaryAuth(registry, limits, limiter, metrics, log)),
+		platformgrpc.WithUnaryServerInterceptor(UnaryAuth(registry, limits, limiter, metrics)),
 	}
 	if cfg.GRPC.TLS.Enabled {
 		tlsConfig, err := platformgrpc.NewTLSConfig(

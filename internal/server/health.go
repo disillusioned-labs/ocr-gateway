@@ -8,8 +8,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/disillusioned-labs/ocr-gateway/internal/handler/health"
 	"github.com/go-chi/chi/v5"
+
+	"github.com/disillusioned-labs/ocr-gateway/internal/handler/health"
 )
 
 // HTTPServer carries the probes for the grpc binary. There is no public API
